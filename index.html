@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Basit Kütüphane Otomasyonu</title>
+<style>
+:root{--bg:#f4f7f5;--card:#fff;--green:#477a5b;--dark:#20352a;--muted:#68756c;--line:#dce6de;--red:#b94a48}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--dark);font:16px system-ui,-apple-system,Segoe UI,sans-serif}
+header{background:linear-gradient(120deg,#dcebdc,#f6e8d9);padding:24px 16px}
+header h1{margin:0 0 6px;font-size:25px}header p{margin:0;color:#526456}
+main{max-width:1000px;margin:18px auto;padding:0 12px 40px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.stat,.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 3px 12px #20352a0a}
+.stat strong{display:block;font-size:24px;color:var(--green)}.stat span{font-size:13px;color:var(--muted)}
+.layout{display:grid;grid-template-columns:1fr 1.5fr;gap:14px}.panel h2{font-size:18px;margin:0 0 12px}
+label{display:block;font-size:13px;font-weight:650;margin:10px 0 5px}
+input,select{width:100%;padding:11px;border:1px solid #cbd8cd;border-radius:9px;background:white;font:inherit}
+button{border:0;border-radius:9px;padding:10px 12px;font:inherit;font-weight:650;cursor:pointer}
+.primary{background:var(--green);color:white;width:100%;margin-top:12px}.secondary{background:#e7f0e7;color:var(--dark)}.danger{background:#f8e6e5;color:var(--red)}
+.toolbar{display:flex;gap:8px;margin-bottom:10px}.toolbar input{flex:1;min-width:0}
+.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e7eee8;vertical-align:top}th{color:var(--muted);font-size:12px}
+.status{display:inline-block;padding:4px 7px;border-radius:99px;font-size:12px;background:#e5f1e5;color:#376747}.status.out{background:#fff0d8;color:#855d1d}
+.actions{display:flex;flex-wrap:wrap;gap:5px}.actions button{padding:6px 8px;font-size:12px}
+.empty{text-align:center;color:var(--muted);padding:22px}.note{font-size:12px;color:var(--muted);margin-top:12px}
+@media(max-width:700px){.layout{grid-template-columns:1fr}.stats{gap:7px}.stat{padding:10px}.stat strong{font-size:21px}.stat span{font-size:11px}header h1{font-size:22px}}
+</style>
+</head>
+<body>
+<header><h1>📚 Kütüphane Otomasyonu</h1><p>Kitapları kaydet, ara ve ödünç işlemlerini takip et.</p></header>
+<main>
+  <section class="stats">
+    <div class="stat"><strong id="total">0</strong><span>Toplam kitap</span></div>
+    <div class="stat"><strong id="available">0</strong><span>Rafta</span></div>
+    <div class="stat"><strong id="borrowed">0</strong><span>Ödünçte</span></div>
+  </section>
+  <div class="layout">
+    <section class="panel">
+      <h2 id="formTitle">Yeni kitap ekle</h2>
+      <form id="bookForm">
+        <input type="hidden" id="bookId">
+        <label for="title">Kitap adı *</label><input id="title" required maxlength="120" placeholder="Örn. Suç ve Ceza">
+        <label for="author">Yazar *</label><input id="author" required maxlength="100" placeholder="Örn. Dostoyevski">
+        <label for="isbn">ISBN / Kitap kodu</label><input id="isbn" maxlength="40" placeholder="İsteğe bağlı">
+        <label for="borrower">Ödünç alan kişi</label><input id="borrower" maxlength="100" placeholder="Ödünç verirken doldur">
+        <button class="primary" type="submit" id="saveBtn">Kitabı kaydet</button>
+        <button class="secondary" type="button" id="cancelEdit" style="display:none;width:100%;margin-top:8px">Düzenlemeyi iptal et</button>
+      </form>
+      <p class="note">Bilgi: Kayıtlar bu cihazın tarayıcısında saklanır. Tarayıcı verilerini silersen kayıtlar silinebilir.</p>
+    </section>
+    <section class="panel">
+      <h2>Kitap listesi</h2>
+      <div class="toolbar"><input id="search" placeholder="Kitap, yazar veya kod ara..."><select id="filter" aria-label="Duruma göre filtre"><option value="all">Tüm durumlar</option><option value="available">Rafta</option><option value="borrowed">Ödünçte</option></select></div>
+      <div class="table-wrap"><table><thead><tr><th>Kitap</th><th>Durum</th><th>İşlemler</th></tr></thead><tbody id="bookRows"></tbody></table></div>
+      <div id="empty" class="empty" style="display:none">Henüz kitap yok. Soldaki formdan ilk kitabı ekle.</div>
+    </section>
+  </div>
+</main>
+<script>
+const KEY = "basitKutuphane_v1";
+let books = [];
+try { books = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { books = []; }
+const $ = id => document.getElementById(id);
+const save = () => localStorage.setItem(KEY, JSON.stringify(books));
+function escapeHtml(value){return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function render(){
+  $("total").textContent = books.length;
+  $("available").textContent = books.filter(b=>!b.borrower).length;
+  $("borrowed").textContent = books.filter(b=>b.borrower).length;
+  const q=$("search").value.trim().toLocaleLowerCase("tr");
+  const f=$("filter").value;
+  const list=books.filter(b=>{
+    const hay=[b.title,b.author,b.isbn,b.borrower].join(" ").toLocaleLowerCase("tr");
+    return hay.includes(q) && (f==="all" || (f==="borrowed" ? !!b.borrower : !b.borrower));
+  });
+  $("bookRows").innerHTML=list.map(b=>`<tr>
+    <td><strong>${escapeHtml(b.title)}</strong><br><span style="color:#68756c">${escapeHtml(b.author)}</span>${b.isbn?`<br><small>Kod: ${escapeHtml(b.isbn)}</small>`:""}${b.borrower?`<br><small>Alan: ${escapeHtml(b.borrower)}</small>`:""}</td>
+    <td><span class="status ${b.borrower?'out':''}">${b.borrower?'Ödünçte':'Rafta'}</span></td>
+    <td><div class="actions">
+      <button class="secondary" onclick="editBook('${b.id}')">Düzenle</button>
+      <button class="secondary" onclick="toggleLoan('${b.id}')">${b.borrower?'İade al':'Ödünç ver'}</button>
+      <button class="danger" onclick="deleteBook('${b.id}')">Sil</button>
+    </div></td></tr>`).join("");
+  $("empty").style.display=list.length?"none":"block";
+}
+$("bookForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const id=$("bookId").value;
+  const item={title:$("title").value.trim(),author:$("author").value.trim(),isbn:$("isbn").value.trim(),borrower:$("borrower").value.trim()};
+  if(!item.title||!item.author)return;
+  if(id){const i=books.findIndex(b=>b.id===id);if(i>=0)books[i]={...books[i],...item};}
+  else books.unshift({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),...item});
+  save();resetForm();render();
+});
+function editBook(id){
+  const b=books.find(x=>x.id===id);if(!b)return;
+  $("bookId").value=b.id;$("title").value=b.title;$("author").value=b.author;$("isbn").value=b.isbn||"";$("borrower").value=b.borrower||"";
+  $("formTitle").textContent="Kitabı düzenle";$("saveBtn").textContent="Değişiklikleri kaydet";$("cancelEdit").style.display="block";
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+function resetForm(){$("bookForm").reset();$("bookId").value="";$("formTitle").textContent="Yeni kitap ekle";$("saveBtn").textContent="Kitabı kaydet";$("cancelEdit").style.display="none";}
+$("cancelEdit").addEventListener("click",resetForm);
+function toggleLoan(id){
+  const b=books.find(x=>x.id===id);if(!b)return;
+  if(b.borrower){b.borrower="";}
+  else {const person=prompt("Ödünç alan kişinin adı:");if(person===null)return;if(!person.trim()){alert("Lütfen kişi adını gir.");return;}b.borrower=person.trim();}
+  save();render();
+}
+function deleteBook(id){const b=books.find(x=>x.id===id);if(b&&confirm(`"${b.title}" kitabı silinsin mi?`)){books=books.filter(x=>x.id!==id);save();render();}}
+$("search").addEventListener("input",render);$("filter").addEventListener("change",render);
+render();
+</script>
+</body>
+</html>
